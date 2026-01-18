@@ -1,6 +1,17 @@
 # Lab Dash
 This is an open-source user interface designed to be your internally hosted homepage for your homelab/server. 
 
+## EX Edition:
+I love what the original developer is doing but there are certain things I want to change and add since I will be using it:
+- [ ] Migrate from plain text storage to SQLite (and maybe others later) with Drizzle,
+- [ ] Add more premade widgets
+- [ ] Add multi user support
+- [ ] Add custom widgets that can be created by Admins and shared with all users
+- [ ] Add multi dashboard support for shared ones
+- [ ] Enchance existing users
+- [ ] Possibly refactor routes
+- [ ] and more...
+
 <img width="1912" alt="Screenshot 2025-05-08 at 8 58 34 PM" src="https://github.com/user-attachments/assets/55ae6a22-33e3-40ab-b1e2-a8deeaa5239b" />
 
 
