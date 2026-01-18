@@ -1,61 +1,21 @@
 import bcrypt from 'bcrypt';
 import { Request, Response, Router } from 'express';
-import fs from 'fs';
 import jwt from 'jsonwebtoken';
-import path from 'path';
+import { eq } from 'drizzle-orm';
 
+import { db } from '../db';
+import { users } from '../db/schema';
 import { authenticateToken } from '../middleware/auth.middleware';
 
 export const authRoute = Router();
-const USERS_PATH = path.join(__dirname, '../config/users.json');
-const JWT_SECRET = process.env.SECRET || '@jZCgtn^qg8So*^^6A2M';
-const REFRESH_TOKEN_SECRET = process.env.SECRET || '@jZCgtn^qg8So*^^6A2M';
+const JWT_SECRET = process.env.SECRET || false;
+const REFRESH_TOKEN_SECRET = process.env.SECRET || false;
 const ACCESS_TOKEN_EXPIRY = '3d';
 const REFRESH_TOKEN_EXPIRY = '7d';
 
-// Interface for user data
-interface User {
-  username: string;
-  passwordHash: string;
-  refreshTokens?: string[];  // Store issued refresh tokens
-  role: 'admin' | 'user';    // Role for authorization
+if (!JWT_SECRET || !REFRESH_TOKEN_SECRET) {
+    throw new Error('JWT_SECRET or REFRESH_TOKEN_SECRET is not set');
 }
-
-// Helper function to read users from JSON file
-const readUsers = (): User[] => {
-    try {
-    // Create directory if it doesn't exist
-        const dir = path.dirname(USERS_PATH);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-
-        // Create file if it doesn't exist
-        if (!fs.existsSync(USERS_PATH)) {
-            fs.writeFileSync(USERS_PATH, JSON.stringify([]));
-            return [];
-        }
-
-        const data = fs.readFileSync(USERS_PATH, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        console.error('Error reading users:', error);
-        return [];
-    }
-};
-
-// Helper function to write users to JSON file
-const writeUsers = (users: User[]): void => {
-    try {
-        const dir = path.dirname(USERS_PATH);
-        if (!fs.existsSync(dir)) {
-            fs.mkdirSync(dir, { recursive: true });
-        }
-        fs.writeFileSync(USERS_PATH, JSON.stringify(users, null, 2));
-    } catch (error) {
-        console.error('Error writing users:', error);
-    }
-};
 
 // Generate access token
 const generateAccessToken = (username: string, role: string): string => {
@@ -92,29 +52,24 @@ authRoute.post('/signup', async (req: Request, res: Response) => {
             return;
         }
 
-        // Check if username is already taken
-        const users = readUsers();
-        if (users.some(user => user.username === username)) {
+        const existingUser = db.select().from(users).where(eq(users.username, username)).get();
+        if (existingUser) {
             res.status(409).json({ message: 'Username already exists' });
             return;
         }
 
-        // Hash the password
         const saltRounds = 10;
         const passwordHash = await bcrypt.hash(password, saltRounds);
 
-        // First user is automatically an admin, others are regular users
-        const isFirstUser = users.length === 0;
-        const role = isFirstUser ? 'admin' : 'user';
+        const allUsers = db.select().from(users).all();
+        const role = allUsers.length === 0 ? 'admin' : 'user';
 
-        // Store the new user with empty refresh tokens array
-        users.push({
+        db.insert(users).values({
             username,
             passwordHash,
-            refreshTokens: [],
-            role
-        });
-        writeUsers(users);
+            role,
+            refreshTokens: JSON.stringify([]),
+        }).run();
 
         // Return success response
         res.status(201).json({ message: 'User created successfully', username });
@@ -135,33 +90,30 @@ authRoute.post('/login', async (req: Request, res: Response) => {
             return;
         }
 
-        // Find the user
-        const users = readUsers();
-        const userIndex = users.findIndex(user => user.username === username);
+        const user = db.select().from(users).where(eq(users.username, username)).get();
 
-        if (userIndex === -1) {
+        if (!user) {
             res.status(401).json({ message: 'Invalid credentials' });
             return;
         }
 
-        // Compare passwords
-        const passwordMatch = await bcrypt.compare(password, users[userIndex].passwordHash);
+        const passwordMatch = await bcrypt.compare(password, user.passwordHash);
 
         if (!passwordMatch) {
             res.status(401).json({ message: 'Invalid credentials' });
             return;
         }
 
-        // Generate tokens
-        const token = generateAccessToken(username, users[userIndex].role);
+        const token = generateAccessToken(username, user.role);
         const refreshToken = generateRefreshToken(username);
 
-        // Store refresh token
-        if (!users[userIndex].refreshTokens) {
-            users[userIndex].refreshTokens = [];
-        }
-        users[userIndex].refreshTokens.push(refreshToken);
-        writeUsers(users);
+        const refreshTokens = user.refreshTokens ? JSON.parse(user.refreshTokens) : [];
+        refreshTokens.push(refreshToken);
+
+        db.update(users)
+            .set({ refreshTokens: JSON.stringify(refreshTokens) })
+            .where(eq(users.id, user.id))
+            .run();
 
         // Set secure HTTP-only cookies
         res.cookie('access_token', token, {
@@ -180,11 +132,10 @@ authRoute.post('/login', async (req: Request, res: Response) => {
             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days in milliseconds
         });
 
-        // Return success without including tokens in response body
         res.json({
             message: 'Login successful',
             username: username,
-            isAdmin: users[userIndex].role === 'admin'
+            isAdmin: user.role === 'admin'
         });
         console.log('login successful');
     } catch (error) {
@@ -253,38 +204,44 @@ authRoute.post('/refresh', async (req: Request, res: Response) => {
             return;
         }
 
-        // Find user with this refresh token
-        const users = readUsers();
-        const userIndex = users.findIndex(user =>
-            user.username === decoded.username &&
-            user.refreshTokens?.includes(refreshToken)
-        );
+        const user = db.select().from(users).where(eq(users.username, decoded.username)).get();
 
-        if (userIndex === -1) {
+        if (!user) {
+            console.log('User does not exist in database');
+            res.clearCookie('access_token', {
+                httpOnly: true,
+                secure: false,
+                sameSite: 'lax',
+                path: '/'
+            });
+            res.clearCookie('refresh_token', {
+                httpOnly: true,
+                secure: false,
+                sameSite: 'lax',
+                path: '/'
+            });
+            res.status(401).json({ message: 'User not found' });
+            return;
+        }
+
+        const userRefreshTokens = user.refreshTokens ? JSON.parse(user.refreshTokens) : [];
+        const tokenIndex = userRefreshTokens.indexOf(refreshToken);
+
+        if (tokenIndex === -1) {
             console.log('Refresh token not found in user record');
 
-            // Check if the user exists at all
-            const userExists = users.some(user => user.username === decoded.username);
-            if (userExists) {
-                console.log('User exists but token is not in their refresh token list. Possible token reuse or database modification.');
-            } else {
-                console.log('User does not exist in database. User may have been deleted or database reset.');
-            }
-
-            // If token is not found, clean up any potentially invalid tokens
-            if (refreshToken) {
-                // Find and remove the refresh token
-                const updatedUsers = users.map(user => {
-                    if (user.refreshTokens?.includes(refreshToken)) {
-                        return {
-                            ...user,
-                            refreshTokens: user.refreshTokens.filter(token => token !== refreshToken)
-                        };
+            const allUsers = db.select().from(users).all();
+            for (const u of allUsers) {
+                if (u.refreshTokens) {
+                    const tokens = JSON.parse(u.refreshTokens);
+                    const filtered = tokens.filter((t: string) => t !== refreshToken);
+                    if (filtered.length !== tokens.length) {
+                        db.update(users)
+                            .set({ refreshTokens: JSON.stringify(filtered) })
+                            .where(eq(users.id, u.id))
+                            .run();
                     }
-                    return user;
-                });
-
-                writeUsers(updatedUsers);
+                }
             }
 
             // Clear the cookies with all necessary options
@@ -311,8 +268,7 @@ authRoute.post('/refresh', async (req: Request, res: Response) => {
 
         console.log('Found valid refresh token for user');
 
-        // Generate new access token
-        const newAccessToken = generateAccessToken(decoded.username, users[userIndex].role);
+        const newAccessToken = generateAccessToken(decoded.username, user.role);
 
         // Set the new access token cookie
         res.cookie('access_token', newAccessToken, {
@@ -333,27 +289,19 @@ authRoute.post('/refresh', async (req: Request, res: Response) => {
             maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
         });
 
-        // Update the user's refresh tokens in the database
-        const updatedUsers = users.map(user => {
-            if (user.username === decoded.username) {
-                return {
-                    ...user,
-                    refreshTokens: [
-                        ...(user.refreshTokens?.filter(token => token !== refreshToken) || []),
-                        newRefreshToken
-                    ]
-                };
-            }
-            return user;
-        });
-        writeUsers(updatedUsers);
+        userRefreshTokens.splice(tokenIndex, 1);
+        userRefreshTokens.push(newRefreshToken);
+
+        db.update(users)
+            .set({ refreshTokens: JSON.stringify(userRefreshTokens) })
+            .where(eq(users.id, user.id))
+            .run();
 
         console.log('New access token set successfully for user');
 
-        // Return success message with user role information
         res.json({
             message: 'Token refreshed successfully',
-            isAdmin: users[userIndex].role === 'admin'
+            isAdmin: user.role === 'admin'
         });
     } catch (error) {
         console.error('Refresh token error:', error);
@@ -369,21 +317,22 @@ authRoute.post('/logout', (req: Request, res: Response) => {
 
         if (refreshToken) {
             console.log('Logout request with valid refresh token');
-            // Find and remove the refresh token
-            const users = readUsers();
 
-            const updatedUsers = users.map(user => {
-                if (user.refreshTokens?.includes(refreshToken)) {
-                    console.log('Removing refresh token from user:', user.username);
-                    return {
-                        ...user,
-                        refreshTokens: user.refreshTokens.filter(token => token !== refreshToken)
-                    };
+            const allUsers = db.select().from(users).all();
+            for (const user of allUsers) {
+                if (user.refreshTokens) {
+                    const tokens = JSON.parse(user.refreshTokens);
+                    if (tokens.includes(refreshToken)) {
+                        console.log('Removing refresh token from user:', user.username);
+                        const filtered = tokens.filter((t: string) => t !== refreshToken);
+                        db.update(users)
+                            .set({ refreshTokens: JSON.stringify(filtered) })
+                            .where(eq(users.id, user.id))
+                            .run();
+                        break;
+                    }
                 }
-                return user;
-            });
-
-            writeUsers(updatedUsers);
+            }
         } else {
             // If no refresh token is provided, it might be a request from a service
             // Don't clear cookies in this case to avoid disrupting service auth
@@ -426,13 +375,10 @@ authRoute.post('/logout', (req: Request, res: Response) => {
     }
 });
 
-// Check if any users exist in the system
 authRoute.get('/check-users', (req: Request, res: Response) => {
     try {
-        const users = readUsers();
-        const hasUsers = users.length > 0;
-
-        res.json({ hasUsers });
+        const allUsers = db.select().from(users).all();
+        res.json({ hasUsers: allUsers.length > 0 });
     } catch (error) {
         console.error('Error checking users:', error);
         res.status(500).json({ message: 'Failed to check if users exist' });

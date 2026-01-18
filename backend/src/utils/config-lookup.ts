@@ -1,17 +1,14 @@
-import fsSync from 'fs';
-import path from 'path';
+import { eq } from 'drizzle-orm';
 
+import { db } from '../db';
+import { dashboardConfig } from '../db/schema';
 import { Config, DashboardItem } from '../types';
 import { decrypt, isEncrypted } from './crypto';
 
-const CONFIG_FILE = path.join(__dirname, '../config/config.json');
-
-/**
- * Load the configuration from disk
- */
 export const loadConfig = (): Config => {
-    if (fsSync.existsSync(CONFIG_FILE)) {
-        return JSON.parse(fsSync.readFileSync(CONFIG_FILE, 'utf-8'));
+    const configRow = db.select().from(dashboardConfig).where(eq(dashboardConfig.key, 'main')).get();
+    if (configRow) {
+        return JSON.parse(configRow.value);
     }
     return { layout: { desktop: [], mobile: [] } };
 };

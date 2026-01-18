@@ -5,6 +5,8 @@ import express, { Application } from 'express';
 import path from 'path';
 
 import { UPLOAD_DIRECTORY } from './src/constants/constants';
+import { initializeDatabase } from './src/db';
+import { migrateFromFiles } from './src/db/migrate';
 import { errorHandler } from './src/middleware/error-handler';
 import { authLimiter, generalLimiter } from './src/middleware/rate-limiter';
 import routes from './src/routes';
@@ -52,7 +54,13 @@ app.use(errorHandler);
 app.listen(PORT, '0.0.0.0', async () => {
     console.log(`Server running on port ${PORT}, accessible via LAN`);
 
-    // Initialize backup service
+    try {
+        await initializeDatabase();
+        await migrateFromFiles();
+    } catch (error) {
+        console.error('Failed to initialize database:', error);
+    }
+
     try {
         const backupService = BackupService.getInstance();
         await backupService.initialize();

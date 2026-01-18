@@ -273,7 +273,7 @@ radarrRoute.delete('/queue/:id', async (req: Request, res: Response) => {
     try {
         const baseUrl = getBaseUrl(req);
         const apiKey = getApiKey(req);
-        const { id } = req.params;
+        const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
         const { removeFromClient = true, blocklist = false } = req.query;
 
         if (!apiKey) {

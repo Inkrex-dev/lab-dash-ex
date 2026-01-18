@@ -256,7 +256,7 @@ jellyseerRoute.post('/request/:id/approve', async (req: Request, res: Response) 
     try {
         const baseUrl = getBaseUrl(req);
         const apiKey = getApiKey(req);
-        const { id } = req.params;
+        const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
         if (!apiKey) {
             res.status(400).json({
@@ -295,7 +295,7 @@ jellyseerRoute.post('/request/:id/decline', async (req: Request, res: Response) 
     try {
         const baseUrl = getBaseUrl(req);
         const apiKey = getApiKey(req);
-        const { id } = req.params;
+        const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
         if (!apiKey) {
             res.status(400).json({
@@ -334,7 +334,7 @@ jellyseerRoute.get('/tv/:tmdbId', async (req: Request, res: Response) => {
     try {
         const baseUrl = getBaseUrl(req);
         const apiKey = getApiKey(req);
-        const { tmdbId } = req.params;
+        const tmdbId = Array.isArray(req.params.tmdbId) ? req.params.tmdbId[0] : req.params.tmdbId;
 
         if (!apiKey) {
             res.status(400).json({

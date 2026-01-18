@@ -346,7 +346,7 @@ sabnzbdRoute.post('/pause/:nzoId', async (req: Request, res: Response) => {
         }
 
         const baseUrl = getBaseUrl(req);
-        const { nzoId } = req.params;
+        const nzoId = Array.isArray(req.params.nzoId) ? req.params.nzoId[0] : req.params.nzoId;
 
         // SABnzbd pause API - simple global pause
         const pauseResponse = await axios.get(`${baseUrl}`, {
@@ -376,7 +376,7 @@ sabnzbdRoute.post('/resume/:nzoId', async (req: Request, res: Response) => {
         }
 
         const baseUrl = getBaseUrl(req);
-        const { nzoId } = req.params;
+        const nzoId = Array.isArray(req.params.nzoId) ? req.params.nzoId[0] : req.params.nzoId;
 
         // SABnzbd resume API - simple global resume
         const resumeResponse = await axios.get(`${baseUrl}`, {
@@ -405,7 +405,7 @@ sabnzbdRoute.delete('/delete/:nzoId', async (req: Request, res: Response) => {
             return;
         }
 
-        const { nzoId } = req.params;
+        const nzoId = Array.isArray(req.params.nzoId) ? req.params.nzoId[0] : req.params.nzoId;
         const deleteFiles = req.query.deleteFiles === 'true';
         const baseUrl = getBaseUrl(req);
 

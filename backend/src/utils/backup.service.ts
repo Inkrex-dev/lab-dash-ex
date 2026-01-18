@@ -1,13 +1,9 @@
-import fs from 'fs';
-import fsPromises from 'fs/promises';
-import path from 'path';
+import { eq } from 'drizzle-orm';
 
+import { db } from '../db';
+import { backupMetadata, dashboardConfig } from '../db/schema';
 import { Config } from '../types';
-
-const CONFIG_FILE = path.join(__dirname, '../config/config.json');
-const BACKUP_DIR = path.join(__dirname, '../config/backups');
-const BACKUP_FILE = path.join(BACKUP_DIR, 'config-weekly-backup.json');
-const BACKUP_METADATA_FILE = path.join(BACKUP_DIR, 'backup-metadata.json');
+import { loadConfig } from './config-lookup';
 
 interface BackupMetadata {
     lastBackupTime: number;
@@ -29,21 +25,13 @@ export class BackupService {
         return BackupService.instance;
     }
 
-    /**
-     * Initialize the backup service and start the weekly backup schedule
-     */
     public async initialize(): Promise<void> {
         try {
-            // Ensure backup directory exists
-            await this.ensureBackupDirectory();
-
-            // Check if we need to perform an immediate backup
             const shouldBackup = await this.shouldPerformBackup();
             if (shouldBackup) {
                 await this.performBackup();
             }
 
-            // Start the periodic backup schedule
             this.startBackupSchedule();
 
             console.log('Backup service initialized successfully');
@@ -63,17 +51,6 @@ export class BackupService {
         }
     }
 
-    /**
-     * Ensure the backup directory exists
-     */
-    private async ensureBackupDirectory(): Promise<void> {
-        try {
-            await fsPromises.access(BACKUP_DIR);
-        } catch {
-            await fsPromises.mkdir(BACKUP_DIR, { recursive: true });
-            console.log('Created backup directory:', BACKUP_DIR);
-        }
-    }
 
     /**
      * Check if a backup should be performed based on the last backup time
@@ -91,65 +68,80 @@ export class BackupService {
         }
     }
 
-    /**
-     * Load backup metadata
-     */
     private async loadBackupMetadata(): Promise<BackupMetadata> {
-        try {
-            const metadataContent = await fsPromises.readFile(BACKUP_METADATA_FILE, 'utf-8');
-            return JSON.parse(metadataContent);
-        } catch {
-            // Return default metadata if file doesn't exist
-            const currentTime = Date.now();
+        const metadataRow = db.select().from(backupMetadata).limit(1).get();
+        if (metadataRow) {
             return {
-                lastBackupTime: 0,
-                nextBackupTime: currentTime + this.backupIntervalMs,
-                backupIntervalMs: this.backupIntervalMs
+                lastBackupTime: metadataRow.lastBackupTime || 0,
+                nextBackupTime: metadataRow.nextBackupTime || 0,
+                backupIntervalMs: metadataRow.backupIntervalMs || this.backupIntervalMs,
             };
+        }
+        const currentTime = Date.now();
+        return {
+            lastBackupTime: 0,
+            nextBackupTime: currentTime + this.backupIntervalMs,
+            backupIntervalMs: this.backupIntervalMs,
+        };
+    }
+
+    private async saveBackupMetadata(metadata: BackupMetadata): Promise<void> {
+        const existing = db.select().from(backupMetadata).limit(1).get();
+        if (existing) {
+            db.update(backupMetadata)
+                .set({
+                    lastBackupTime: metadata.lastBackupTime,
+                    nextBackupTime: metadata.nextBackupTime,
+                    backupIntervalMs: metadata.backupIntervalMs,
+                })
+                .where(eq(backupMetadata.id, existing.id))
+                .run();
+        } else {
+            db.insert(backupMetadata).values({
+                lastBackupTime: metadata.lastBackupTime,
+                nextBackupTime: metadata.nextBackupTime,
+                backupIntervalMs: metadata.backupIntervalMs,
+            }).run();
         }
     }
 
-    /**
-     * Save backup metadata
-     */
-    private async saveBackupMetadata(metadata: BackupMetadata): Promise<void> {
-        await fsPromises.writeFile(BACKUP_METADATA_FILE, JSON.stringify(metadata, null, 2), 'utf-8');
-    }
-
-    /**
-     * Perform the actual backup
-     */
     public async performBackup(): Promise<void> {
         try {
-            // Check if config file exists
-            if (!fs.existsSync(CONFIG_FILE)) {
-                console.warn('Config file does not exist, skipping backup');
-                return;
-            }
+            const configData = loadConfig();
 
-            // Read the current config
-            const configContent = await fsPromises.readFile(CONFIG_FILE, 'utf-8');
-            const config: Config = JSON.parse(configContent);
-
-            // Create backup with timestamp comment
             const backupData = {
-                ...config,
+                ...configData,
                 _backupMetadata: {
                     createdAt: new Date().toISOString(),
                     backupVersion: '1.0',
-                    originalConfigPath: CONFIG_FILE
-                }
+                },
             };
 
-            // Write backup file (this will overwrite the previous backup)
-            await fsPromises.writeFile(BACKUP_FILE, JSON.stringify(backupData, null, 2), 'utf-8');
+            const backupKey = 'backup_weekly';
+            const existingBackup = db.select().from(dashboardConfig).where(eq(dashboardConfig.key, backupKey)).get();
 
-            // Update metadata
+            if (existingBackup) {
+                db.update(dashboardConfig)
+                    .set({
+                        value: JSON.stringify(backupData),
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(dashboardConfig.key, backupKey))
+                    .run();
+            } else {
+                db.insert(dashboardConfig).values({
+                    key: backupKey,
+                    value: JSON.stringify(backupData),
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                }).run();
+            }
+
             const currentTime = Date.now();
             const metadata: BackupMetadata = {
                 lastBackupTime: currentTime,
                 nextBackupTime: currentTime + this.backupIntervalMs,
-                backupIntervalMs: this.backupIntervalMs
+                backupIntervalMs: this.backupIntervalMs,
             };
             await this.saveBackupMetadata(metadata);
 
@@ -184,9 +176,6 @@ export class BackupService {
         console.log('Backup schedule started');
     }
 
-    /**
-     * Get backup status and next backup time
-     */
     public async getBackupStatus(): Promise<{
         lastBackupTime: string | null;
         nextBackupTime: string;
@@ -194,49 +183,55 @@ export class BackupService {
     }> {
         try {
             const metadata = await this.loadBackupMetadata();
-            const backupExists = fs.existsSync(BACKUP_FILE);
+            const backupRow = db.select().from(dashboardConfig).where(eq(dashboardConfig.key, 'backup_weekly')).get();
 
             return {
                 lastBackupTime: metadata.lastBackupTime ? new Date(metadata.lastBackupTime).toISOString() : null,
                 nextBackupTime: new Date(metadata.nextBackupTime).toISOString(),
-                backupExists
+                backupExists: !!backupRow,
             };
         } catch (error) {
             console.error('Error getting backup status:', error);
             return {
                 lastBackupTime: null,
                 nextBackupTime: new Date(Date.now() + this.backupIntervalMs).toISOString(),
-                backupExists: false
+                backupExists: false,
             };
         }
     }
 
-    /**
-     * Manually trigger a backup (useful for testing or manual backups)
-     */
     public async triggerManualBackup(): Promise<void> {
         await this.performBackup();
     }
 
-    /**
-     * Restore from backup
-     */
     public async restoreFromBackup(): Promise<void> {
         try {
-            if (!fs.existsSync(BACKUP_FILE)) {
-                throw new Error('No backup file found');
+            const backupRow = db.select().from(dashboardConfig).where(eq(dashboardConfig.key, 'backup_weekly')).get();
+
+            if (!backupRow) {
+                throw new Error('No backup found');
             }
 
-            // Read backup file
-            const backupContent = await fsPromises.readFile(BACKUP_FILE, 'utf-8');
-            const backupData = JSON.parse(backupContent);
-
-            // Remove backup metadata before restoring
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
+            const backupData = JSON.parse(backupRow.value);
             const { _backupMetadata, ...configData } = backupData;
 
-            // Write to config file
-            await fsPromises.writeFile(CONFIG_FILE, JSON.stringify(configData, null, 2), 'utf-8');
+            const mainConfig = db.select().from(dashboardConfig).where(eq(dashboardConfig.key, 'main')).get();
+            if (mainConfig) {
+                db.update(dashboardConfig)
+                    .set({
+                        value: JSON.stringify(configData),
+                        updatedAt: new Date(),
+                    })
+                    .where(eq(dashboardConfig.key, 'main'))
+                    .run();
+            } else {
+                db.insert(dashboardConfig).values({
+                    key: 'main',
+                    value: JSON.stringify(configData),
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                }).run();
+            }
 
             console.log('Config restored from backup successfully');
         } catch (error) {

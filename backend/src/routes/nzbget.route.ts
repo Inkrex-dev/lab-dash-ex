@@ -478,7 +478,7 @@ nzbgetRoute.delete('/delete/:nzbId', async (req: Request, res: Response) => {
             return;
         }
 
-        const { nzbId } = req.params;
+        const nzbId = Array.isArray(req.params.nzbId) ? req.params.nzbId[0] : req.params.nzbId;
         const deleteFiles = req.query.deleteFiles === 'true';
 
         // Delete the download

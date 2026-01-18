@@ -42,7 +42,7 @@ export const getSystemInfo = async (networkInterface?: string): Promise<Systemin
         // Get the primary network interface - look for active interfaces first
         let network = null;
         if (networkInfo && networkInfo.length > 0) {
-            let selectedInterface;
+            let selectedInterface: Systeminformation.NetworkStatsData | undefined;
 
             // If a specific interface was requested, use it
             if (networkInterface && networkInterfaces) {
@@ -77,7 +77,7 @@ export const getSystemInfo = async (networkInterface?: string): Promise<Systemin
             let speed = 0;
             if (networkInterfaces && selectedInterface) {
                 const matchingInterface = networkInterfaces.find(
-                    ni => ni.iface === selectedInterface.iface
+                    ni => ni.iface === selectedInterface?.iface
                 );
 
                 if (matchingInterface && typeof matchingInterface.speed === 'number' && matchingInterface.speed > 0) {

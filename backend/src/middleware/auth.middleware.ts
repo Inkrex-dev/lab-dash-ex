@@ -1,7 +1,10 @@
 import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.SECRET || '@jZCgtn^qg8So*^^6A2M'; // Same secret used in auth.route.ts
+const JWT_SECRET = process.env.SECRET || false; // Same secret used in auth.route.ts
+if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET is not set');
+}
 
 // Define custom Request interface with user property
 

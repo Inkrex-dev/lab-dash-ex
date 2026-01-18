@@ -1,6 +1,9 @@
 import crypto from 'crypto';
 
-const ENCRYPTION_KEY = process.env.SECRET || '@jZCgtn^qg8So*^^6A2M';
+const ENCRYPTION_KEY = process.env.SECRET || false;
+if (!ENCRYPTION_KEY) {
+    throw new Error('ENCRYPTION_KEY is not set');
+}
 const IV_LENGTH = 16; // For AES, this is always 16 bytes
 
 /**
@@ -9,7 +12,7 @@ const IV_LENGTH = 16; // For AES, this is always 16 bytes
  * @returns Encrypted string in format 'iv:encryptedData' encoded in base64
  */
 export function encrypt(text: string): string {
-    if (!text) return '';
+    if (!text || !ENCRYPTION_KEY) return '';
 
     // Create a random initialization vector
     const iv = crypto.randomBytes(IV_LENGTH);
@@ -32,7 +35,7 @@ export function encrypt(text: string): string {
  * @returns The decrypted plaintext, or empty string if decryption fails
  */
 export function decrypt(encryptedText: string): string {
-    if (!encryptedText || !encryptedText.startsWith('ENC:')) {
+    if (!encryptedText || !encryptedText.startsWith('ENC:') || !ENCRYPTION_KEY) {
         return encryptedText;
     }
 

@@ -39,6 +39,7 @@ export type Config = {
     lastSeenVersion?: string;
     notes?: Note[];
     themeColor?: string;
+    defaultNoteFontSize?: string;
 }
 
 export type Note = {
