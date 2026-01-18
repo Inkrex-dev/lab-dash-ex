@@ -2,6 +2,7 @@
 This is an open-source user interface designed to be your internally hosted homepage for your homelab/server. 
 
 ## EX Edition:
+**Note:** *this is an experiemtnal build and will remain that way until all implementations conclude on my end. Once that's done, a release will be made here and docs will be updated accordingly.*
 I love what the original developer is doing but there are certain things I want to change and add since I will be using it:
 - [ ] Migrate from plain json storage to SQLite (and maybe others later) with Drizzle,
 - [ ] Add more premade widgets
