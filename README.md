@@ -3,12 +3,12 @@ This is an open-source user interface designed to be your internally hosted home
 
 ## EX Edition:
 I love what the original developer is doing but there are certain things I want to change and add since I will be using it:
-- [ ] Migrate from plain text storage to SQLite (and maybe others later) with Drizzle,
+- [ ] Migrate from plain json storage to SQLite (and maybe others later) with Drizzle,
 - [ ] Add more premade widgets
 - [ ] Add multi user support
 - [ ] Add custom widgets that can be created by Admins and shared with all users
 - [ ] Add multi dashboard support for shared ones
-- [ ] Enchance existing users
+- [ ] Enchance existing widgets
 - [ ] Possibly refactor routes
 - [ ] and more...
 
